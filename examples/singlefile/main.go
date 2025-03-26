@@ -36,11 +36,11 @@ func main() {
 			}
 
 			if res.ExitCode() == 0 {
-				fmt.Printf("- Repository %s/%s has %s\n", org, repository, readmeFile)
+				fmt.Printf("- Repository %s/%s has %s\n", org, repository.Name, readmeFile)
 				return nil
 			}
 
-			fmt.Printf("- Repository %s/%s has no %s\n", org, repository, readmeFile)
+			fmt.Printf("- Repository %s/%s has no %s\n", org, repository.Name, readmeFile)
 
 			return nil
 		}, iterator.Options{
