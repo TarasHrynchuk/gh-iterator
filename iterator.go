@@ -45,10 +45,10 @@ func init() {
 
 // Processor is the function that process a repository.
 // - ctx is the context to cancel the processing.
-// - repository is the name of the repository.
+// - repository is the Repository structure.
 // - isEmpty is a flag to indicate if the repository is empty i.e. no branches nor commits.
 // - exec is an exec.Execer to run commands in the repository directory.
-type Processor func(ctx context.Context, repository string, isEmpty bool, exec exec.Execer) error
+type Processor func(ctx context.Context, repository Repository, isEmpty bool, exec exec.Execer) error
 
 type Options struct {
 	// UseHTTPS is a flag to use HTTPS instead of SSH to clone the repositories.
@@ -336,7 +336,7 @@ func processRepository(ctx context.Context, repo Repository, processor Processor
 	}
 
 	if repo.Size == 0 {
-		if err := processor(processCtx, repo.Name, true, exec.NewExecer("", false)); err != nil {
+		if err := processor(processCtx, repo, true, exec.NewExecer("", false)); err != nil {
 			return fmt.Errorf("processing empty repository: %w", err)
 		}
 	}
@@ -347,7 +347,7 @@ func processRepository(ctx context.Context, repo Repository, processor Processor
 	}
 	defer os.RemoveAll(repoDir)
 
-	if err := processor(processCtx, repo.Name, false, exec.NewExecer(repoDir, opts.Debug)); err != nil {
+	if err := processor(processCtx, repo, false, exec.NewExecer(repoDir, opts.Debug)); err != nil {
 		return fmt.Errorf("processing repository: %w", err)
 	}
 
