@@ -368,7 +368,7 @@ func checkRemoteCommits(ctx context.Context, repo Repository, exec exec.Execer) 
         // Check if the commit is older than one year
         if commitDate.Before(oneYearAgo) {
             isValidCommits = false
-            fmt.Printf("repository %s has commits older than one year", repo.Name)
+            fmt.Printf("repository %s has commits older than one year\n", repo.Name)
             break
         }
     }
