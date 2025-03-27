@@ -27,6 +27,7 @@ type Repository struct {
 	Visibility        string `json:"visibility"`
 	Fork              bool   `json:"fork"`
 	Size              int    `json:"size"`
+	Outdated          bool
 }
 
 var (
@@ -329,89 +330,87 @@ func cloneRepository(ctx context.Context, repo Repository, opts Options) (string
 	return repoDir, nil
 }
 
+func checkRecentCommits(ctx context.Context, repo Repository, exec exec.Execer) error {
+	oneYearAgo := time.Now().AddDate(-1, 0, 0)
+	// Ensure the repository has a default branch specified
+	if repo.DefaultBranchName == "" {
+		return fmt.Errorf("repository %s has no default branch specified", repo.Name)
+	}
+	// Use GitHub CLI to fetch commits from the repository
+	ghArgs := []string{"api",
+		fmt.Sprintf("/repos/%s/commits", repo.Name),
+		"-H", "Accept: application/vnd.github+json",
+		"--jq", ".[] | {sha: .sha, date: .commit.author.date, message: .commit.message}",
+	}
+	res, err := exec.RunX(ctx, "gh", ghArgs...)
+	if err != nil {
+		return fmt.Errorf("fetching commits via GitHub API: %w", err)
+	}
+	// Parse the JSON response
+	var commits []struct {
+		Date    string `json:"date"`
+		Message string `json:"message"`
+		SHA     string `json:"sha"`
+	}
+	res = strings.ReplaceAll(res, "\n", ",")
+	res = res[:len(res)-1]
+	res = fmt.Sprintf("[%s]\n", res)
+	if err := json.Unmarshal([]byte(res), &commits); err != nil {
+		return fmt.Errorf("parsing commits response: %w", err)
+	}
+	// Iterate over two latest commits
+	for _, commit := range commits[0:2] {
+		commitDate, err := time.Parse(time.RFC3339, commit.Date)
+		if err != nil {
+			return fmt.Errorf("parsing commit date: %w", err)
+		}
+		// Check if the commit is older than one year
+		if commitDate.Before(oneYearAgo) {
+			return fmt.Errorf("repository %s has commits older than one year", repo.Name)
+		}
+	}
 
-func checkRemoteCommits(ctx context.Context, repo Repository, exec exec.Execer) error {
-    oneYearAgo := time.Now().AddDate(-1, 0, 0)
-    // Ensure the repository has a default branch specified
-    if repo.DefaultBranchName == "" {
-        return fmt.Errorf("repository %s has no default branch specified", repo.Name)
-    }
-    // Use GitHub CLI to fetch commits from the repository
-    ghArgs := []string{"api",
-        fmt.Sprintf("/repos/%s/commits", repo.Name),
-        "-H", "Accept: application/vnd.github+json",
-        "--jq", ".[] | {sha: .sha, date: .commit.author.date, message: .commit.message}",
-    }
-    res, err := exec.RunX(ctx, "gh", ghArgs...)
-    if err != nil {
-        return fmt.Errorf("fetching commits via GitHub API: %w", err)
-    }
-    // Parse the JSON response
-    var commits []struct {
-        Date    string `json:"date"`
-        Message string `json:"message"`
-        SHA     string `json:"sha"`
-    }
-    res = strings.ReplaceAll(res, "\n", ",")
-    res = res[:len(res)-1]
-    res = fmt.Sprintf("[%s]\n", res)
-    if err := json.Unmarshal([]byte(res), &commits); err != nil {
-        return fmt.Errorf("parsing commits response: %w", err)
-    }
-    // Iterate over each commit
-    var isValidCommits bool = true
-    for _, commit := range commits[0:2] {
-        commitDate, err := time.Parse(time.RFC3339, commit.Date)
-        if err != nil {
-            return fmt.Errorf("parsing commit date: %w", err)
-        }
-        // Check if the commit is older than one year
-        if commitDate.Before(oneYearAgo) {
-            isValidCommits = false
-            fmt.Printf("repository %s has commits older than one year\n", repo.Name)
-            break
-        }
-    }
-    if isValidCommits {
-        return nil
-    }
-    // If no valid commit is found, return an error
-    return fmt.Errorf(`found last commits greater than one year for repository: %s`, repo.Name)
+	return nil
 }
 
 func processRepository(ctx context.Context, repo Repository, processor Processor, opts Options) error {
-    processCtx := ctx
-    if opts.ContextEnricher != nil {
-        processCtx = opts.ContextEnricher(ctx, repo)
-    }
+	processCtx := ctx
+	if opts.ContextEnricher != nil {
+		processCtx = opts.ContextEnricher(ctx, repo)
+	}
 
-    if repo.Size == 0 {
-        if err := processor(processCtx, repo, true, exec.NewExecer("", false)); err != nil {
-            return fmt.Errorf("processing empty repository: %w", err)
-        }
-    }
+	if repo.Size == 0 {
+		if err := processor(processCtx, repo, true, exec.NewExecer("", false)); err != nil {
+			return fmt.Errorf("processing empty repository: %w", err)
+		}
+	}
 
-    // Create an execer for remote operations
-    execer := exec.NewExecer(".", opts.Debug)
+	// Create an execer for remote operations
+	execer := exec.NewExecer(".", opts.Debug)
 
-    // Check commits on the remote repository before proceeding
-    if err := checkRemoteCommits(ctx, repo, execer); err != nil {
-        return fmt.Errorf("checking remote commits: %w", err)
-    }
+	// Check commits on the remote repository before proceeding
+	err := checkRecentCommits(ctx, repo, execer)
+	if err != nil {
+		repo.Outdated = true
+	}
 
-    // Clone the repository after filtering commits
-    repoDir, err := cloneRepository(ctx, repo, opts)
-    if err != nil {
-        return err
-    }
-    defer os.RemoveAll(repoDir)
+	var repoDir = ""
+	if !repo.Outdated {
 
-    // Process the repository after cloning
-    if err := processor(processCtx, repo, false, exec.NewExecer(repoDir, opts.Debug)); err != nil {
-        return fmt.Errorf("processing repository: %w", err)
-    }
+		// Clone the repository after filtering commits
+		repoDir, err := cloneRepository(ctx, repo, opts)
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(repoDir)
+	}
 
-    return nil
+	// Process the repository after cloning
+	if err := processor(processCtx, repo, false, exec.NewExecer(repoDir, opts.Debug)); err != nil {
+		return fmt.Errorf("processing repository: %w", err)
+	}
+
+	return nil
 }
 
 // fillLines writes the lines to a file.
