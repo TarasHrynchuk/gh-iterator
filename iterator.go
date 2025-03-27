@@ -338,47 +338,31 @@ func checkRemoteCommits(ctx context.Context, repo Repository, exec exec.Execer) 
 		return fmt.Errorf("repository %s has no default branch specified", repo.Name)
 	}
 
-	// Fetch all commits from the default branch starting from the latest
-	res, err := exec.RunX(ctx, "git", "ls-remote", "--heads", repo.SSHURL, repo.DefaultBranchName)
+	// Use GitHub CLI to fetch commits from the repository
+	ghArgs := []string{"api",
+		fmt.Sprintf("/repos/%s/commits", repo.Name),
+		"-H", "Accept: application/vnd.github+json",
+		"--jq", ".[] | {sha: .sha, date: .commit.author.date, message: .commit.message}",
+	}
+
+	res, err := exec.RunX(ctx, "gh", ghArgs...)
 	if err != nil {
-		return fmt.Errorf("fetching remote branch info: %w", err)
+		return fmt.Errorf("fetching commits via GitHub API: %w", err)
 	}
 
-	// Parse the output to extract the commit hash
-	lines := strings.Split(res, "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
-		return fmt.Errorf("no commits found for branch %s in repository %s", repo.DefaultBranchName, repo.Name)
+	// Parse the JSON response
+	var commits []struct {
+		SHA     string `json:"sha"`
+		Date    string `json:"date"`
+		Message string `json:"message"`
 	}
-	parts := strings.Fields(lines[0])
-	if len(parts) < 1 {
-		return fmt.Errorf("invalid response from ls-remote for branch %s", repo.DefaultBranchName)
-	}
-	latestCommitHash := parts[0]
-
-	// Fetch the commit history starting from the latest commit
-	logOutput, err := exec.RunX(ctx, "git", "log", "--format=%H|%ci|%s", "--", repo.SSHURL, latestCommitHash)
-	if err != nil {
-		return fmt.Errorf("fetching commit history: %w", err)
+	if err := json.Unmarshal([]byte(res), &commits); err != nil {
+		return fmt.Errorf("parsing commits response: %w", err)
 	}
 
-	// Iterate over each commit in the log
-	commits := strings.Split(logOutput, "\n")
-	for _, commitLine := range commits {
-		if strings.TrimSpace(commitLine) == "" {
-			continue
-		}
-
-		commitParts := strings.SplitN(commitLine, "|", 3)
-		if len(commitParts) < 3 {
-			return fmt.Errorf("invalid commit log format")
-		}
-
-		commitHash := commitParts[0]
-		commitDateStr := commitParts[1]
-		commitMsg := commitParts[2]
-
-		// Parse the commit date
-		commitDate, err := time.Parse("2006-01-02 15:04:05 -0700", commitDateStr)
+	// Iterate over each commit
+	for _, commit := range commits {
+		commitDate, err := time.Parse(time.RFC3339, commit.Date)
 		if err != nil {
 			return fmt.Errorf("parsing commit date: %w", err)
 		}
@@ -389,8 +373,8 @@ func checkRemoteCommits(ctx context.Context, repo Repository, exec exec.Execer) 
 		}
 
 		// Check if the commit message contains "bot"
-		if strings.Contains(strings.ToLower(commitMsg), "bot") {
-			fmt.Printf("Skipping repository %s: commit %s message contains 'bot'\n", repo.Name, commitHash)
+		if strings.Contains(strings.ToLower(commit.Message), "bot") {
+			fmt.Printf("Skipping repository %s: commit %s message contains 'bot'\n", repo.Name, commit.SHA)
 			continue
 		}
 
