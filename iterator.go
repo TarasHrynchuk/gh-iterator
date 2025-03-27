@@ -356,7 +356,7 @@ func checkRemoteCommits(ctx context.Context, repo Repository, exec exec.Execer) 
 	latestCommitHash := parts[0]
 
 	// Fetch the commit history starting from the latest commit
-	logOutput, err := exec.RunX(ctx, "git", "log", "--format=%H|%ci|%s", latestCommitHash)
+	logOutput, err := exec.RunX(ctx, "git", "log", "--format=%H|%ci|%s", "--", repo.SSHURL, latestCommitHash)
 	if err != nil {
 		return fmt.Errorf("fetching commit history: %w", err)
 	}
