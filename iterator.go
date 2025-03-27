@@ -331,59 +331,52 @@ func cloneRepository(ctx context.Context, repo Repository, opts Options) (string
 
 
 func checkRemoteCommits(ctx context.Context, repo Repository, exec exec.Execer) error {
-	oneYearAgo := time.Now().AddDate(-1, 0, 0)
-
-	// Ensure the repository has a default branch specified
-	if repo.DefaultBranchName == "" {
-		return fmt.Errorf("repository %s has no default branch specified", repo.Name)
-	}
-
-	// Use GitHub CLI to fetch commits from the repository
-	ghArgs := []string{"api",
-		fmt.Sprintf("/repos/%s/commits", repo.Name),
-		"-H", "Accept: application/vnd.github+json",
-		"--jq", ".[] | {sha: .sha, date: .commit.author.date, message: .commit.message}",
-	}
-
-	res, err := exec.RunX(ctx, "gh", ghArgs...)
-	if err != nil {
-		return fmt.Errorf("fetching commits via GitHub API: %w", err)
-	}
-
-	// Parse the JSON response
-	var commits []struct {
-		SHA     string `json:"sha"`
-		Date    string `json:"date"`
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal([]byte(res), &commits); err != nil {
-		return fmt.Errorf("parsing commits response: %w", err)
-	}
-
-	// Iterate over each commit
-	for _, commit := range commits {
-		commitDate, err := time.Parse(time.RFC3339, commit.Date)
-		if err != nil {
-			return fmt.Errorf("parsing commit date: %w", err)
-		}
-
-		// Check if the commit is older than one year
-		if commitDate.Before(oneYearAgo) {
-			return fmt.Errorf("repository %s has commits older than one year", repo.Name)
-		}
-
-		// Check if the commit message contains "bot"
-		if strings.Contains(strings.ToLower(commit.Message), "bot") {
-			fmt.Printf("Skipping repository %s: commit %s message contains 'bot'\n", repo.Name, commit.SHA)
-			continue
-		}
-
-		// If a valid commit is found, return nil
-		return nil
-	}
-
-	// If no valid commit is found, return an error
-	return fmt.Errorf("no valid commits found for repository %s", repo.Name)
+    oneYearAgo := time.Now().AddDate(-1, 0, 0)
+    // Ensure the repository has a default branch specified
+    if repo.DefaultBranchName == "" {
+        return fmt.Errorf("repository %s has no default branch specified", repo.Name)
+    }
+    // Use GitHub CLI to fetch commits from the repository
+    ghArgs := []string{"api",
+        fmt.Sprintf("/repos/%s/commits", repo.Name),
+        "-H", "Accept: application/vnd.github+json",
+        "--jq", ".[] | {sha: .sha, date: .commit.author.date, message: .commit.message}",
+    }
+    res, err := exec.RunX(ctx, "gh", ghArgs...)
+    if err != nil {
+        return fmt.Errorf("fetching commits via GitHub API: %w", err)
+    }
+    // Parse the JSON response
+    var commits []struct {
+        Date    string `json:"date"`
+        Message string `json:"message"`
+        SHA     string `json:"sha"`
+    }
+    res = strings.ReplaceAll(res, "\n", ",")
+    res = res[:len(res)-1]
+    res = fmt.Sprintf("[%s]\n", res)
+    if err := json.Unmarshal([]byte(res), &commits); err != nil {
+        return fmt.Errorf("parsing commits response: %w", err)
+    }
+    // Iterate over each commit
+    var isValidCommits bool = true
+    for _, commit := range commits[0:2] {
+        commitDate, err := time.Parse(time.RFC3339, commit.Date)
+        if err != nil {
+            return fmt.Errorf("parsing commit date: %w", err)
+        }
+        // Check if the commit is older than one year
+        if commitDate.Before(oneYearAgo) {
+            isValidCommits = false
+            fmt.Printf("repository %s has commits older than one year", repo.Name)
+            break
+        }
+    }
+    if isValidCommits {
+        return nil
+    }
+    // If no valid commit is found, return an error
+    return fmt.Errorf(`found last commits greater than one year for repository: %s`, repo.Name)
 }
 
 func processRepository(ctx context.Context, repo Repository, processor Processor, opts Options) error {
