@@ -331,66 +331,75 @@ func cloneRepository(ctx context.Context, repo Repository, opts Options) (string
 
 
 func checkRemoteCommits(ctx context.Context, repo Repository, exec exec.Execer) error {
-    oneYearAgo := time.Now().AddDate(-1, 0, 0)
+	oneYearAgo := time.Now().AddDate(-1, 0, 0)
 
-    // Ensure the repository has a default branch specified
-    if repo.DefaultBranchName == "" {
-        return fmt.Errorf("repository %s has no default branch specified", repo.Name)
-    }
+	// Ensure the repository has a default branch specified
+	if repo.DefaultBranchName == "" {
+		return fmt.Errorf("repository %s has no default branch specified", repo.Name)
+	}
 
-    // Get the latest commit hash of the default branch from the remote
-    res, err := exec.RunX(ctx, "git", "ls-remote", "--heads", repo.SSHURL, repo.DefaultBranchName)
-    if err != nil {
-        return fmt.Errorf("fetching remote branch info: %w", err)
-    }
+	// Fetch all commits from the default branch starting from the latest
+	res, err := exec.RunX(ctx, "git", "ls-remote", "--heads", repo.SSHURL, repo.DefaultBranchName)
+	if err != nil {
+		return fmt.Errorf("fetching remote branch info: %w", err)
+	}
 
-    // Parse the output to extract the commit hash
-    lines := strings.Split(res, "\n")
-    if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
-        return fmt.Errorf("no commits found for branch %s in repository %s", repo.DefaultBranchName, repo.Name)
-    }
-    parts := strings.Fields(lines[0])
-    if len(parts) < 1 {
-        return fmt.Errorf("invalid response from ls-remote for branch %s", repo.DefaultBranchName)
-    }
-    commitHash := parts[0]
+	// Parse the output to extract the commit hash
+	lines := strings.Split(res, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
+		return fmt.Errorf("no commits found for branch %s in repository %s", repo.DefaultBranchName, repo.Name)
+	}
+	parts := strings.Fields(lines[0])
+	if len(parts) < 1 {
+		return fmt.Errorf("invalid response from ls-remote for branch %s", repo.DefaultBranchName)
+	}
+	latestCommitHash := parts[0]
 
-    // Fetch commit details for the latest commit
-    commitDetails, err := exec.RunX(ctx, "git", "show", "--no-patch", "--format=%ci|%s", commitHash)
-    if err != nil {
-        return fmt.Errorf("fetching commit details: %w", err)
-    }
+	// Fetch the commit history starting from the latest commit
+	logOutput, err := exec.RunX(ctx, "git", "log", "--format=%H|%ci|%s", latestCommitHash)
+	if err != nil {
+		return fmt.Errorf("fetching commit history: %w", err)
+	}
 
-    // Parse the commit details
-    detailsParts := strings.SplitN(commitDetails, "|", 2)
-    if len(detailsParts) < 2 {
-        return fmt.Errorf("invalid commit details format")
-    }
-    commitDateStr := detailsParts[0]
-    commitMsg := detailsParts[1]
+	// Iterate over each commit in the log
+	commits := strings.Split(logOutput, "\n")
+	for _, commitLine := range commits {
+		if strings.TrimSpace(commitLine) == "" {
+			continue
+		}
 
-    // Parse the commit date
-    commitDate, err := time.Parse("2006-01-02 15:04:05 -0700", commitDateStr)
-    if err != nil {
-        return fmt.Errorf("parsing commit date: %w", err)
-    }
+		commitParts := strings.SplitN(commitLine, "|", 3)
+		if len(commitParts) < 3 {
+			return fmt.Errorf("invalid commit log format")
+		}
 
-    // Check if the commit is older than one year
-    if commitDate.Before(oneYearAgo) {
-        fmt.Printf("Skipping repository %s: latest commit is older than one year\n", repo.Name)
-        return nil
-    }
+		commitHash := commitParts[0]
+		commitDateStr := commitParts[1]
+		commitMsg := commitParts[2]
 
-    // Check if the commit message contains "bot"
-    if strings.Contains(strings.ToLower(commitMsg), "bot") {
-        fmt.Printf("Skipping repository %s: latest commit message contains 'bot'\n", repo.Name)
-        return nil
-    }
+		// Parse the commit date
+		commitDate, err := time.Parse("2006-01-02 15:04:05 -0700", commitDateStr)
+		if err != nil {
+			return fmt.Errorf("parsing commit date: %w", err)
+		}
 
-    // Process the commit (you can add your logic here)
-    fmt.Printf("Processing repository %s: commit %s - %s\n", repo.Name, commitHash, commitMsg)
+		// Check if the commit is older than one year
+		if commitDate.Before(oneYearAgo) {
+			return fmt.Errorf("repository %s has commits older than one year", repo.Name)
+		}
 
-    return nil
+		// Check if the commit message contains "bot"
+		if strings.Contains(strings.ToLower(commitMsg), "bot") {
+			fmt.Printf("Skipping repository %s: commit %s message contains 'bot'\n", repo.Name, commitHash)
+			continue
+		}
+
+		// If a valid commit is found, return nil
+		return nil
+	}
+
+	// If no valid commit is found, return an error
+	return fmt.Errorf("no valid commits found for repository %s", repo.Name)
 }
 
 func processRepository(ctx context.Context, repo Repository, processor Processor, opts Options) error {
