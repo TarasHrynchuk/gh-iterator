@@ -292,7 +292,7 @@ func cloneRepository(ctx context.Context, repo Repository, opts Options) (string
 
 	info, err := os.Stat(repoDir)
 	if err == nil && info.IsDir() {
-		fmt.Print("\nRepo already exist. Checkout default branch.\n")
+		fmt.Print("Repo already exist. Checkout default branch.\n")
 		if _, err := exec.RunX(ctx, "git", "checkout", repo.DefaultBranchName, "-f"); err != nil {
 			return "", fmt.Errorf("checking out HEAD: %w", err)
 		}
