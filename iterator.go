@@ -284,13 +284,24 @@ var (
 )
 
 func cloneRepository(ctx context.Context, repo Repository, opts Options) (string, error) {
-	repoDir := path.Join(reposDir, repo.Name+"-"+time.Now().Format("02-15-04-05"))
+	repoDir := path.Join(reposDir, repo.Name+"-"+time.Now().Format("2006-01-02"))
+
+	fmt.Printf("Cloning repo to: %s \n", repoDir)
+
+	exec := exec.NewExecer(repoDir, opts.Debug)
+
+	info, err := os.Stat(repoDir)
+	if err == nil && info.IsDir() {
+		fmt.Print("\nRepo already exist. Checkout default branch.\n")
+		if _, err := exec.RunX(ctx, "git", "checkout", repo.DefaultBranchName, "-f"); err != nil {
+			return "", fmt.Errorf("checking out HEAD: %w", err)
+		}
+		return repoDir, nil
+	}
 
 	if err := os.MkdirAll(repoDir, os.ModePerm); err != nil {
 		return "", fmt.Errorf("creating cloning directory: %w", err)
 	}
-
-	exec := exec.NewExecer(repoDir, opts.Debug)
 
 	if _, err := exec.RunX(ctx, "git", "init"); err != nil {
 		return "", fmt.Errorf("cloning repository: %w", err)
@@ -394,15 +405,19 @@ func processRepository(ctx context.Context, repo Repository, processor Processor
 		repo.Outdated = true
 	}
 
-	var repoDir = ""
-	if !repo.Outdated {
+	var (
+		repoDir string
+	)
 
+	if !repo.Outdated {
 		// Clone the repository after filtering commits
-		repoDir, err := cloneRepository(ctx, repo, opts)
+		repoDir, err = cloneRepository(ctx, repo, opts)
 		if err != nil {
 			return err
 		}
-		defer os.RemoveAll(repoDir)
+
+		// TODO Remove all repositories at the end of script execution
+		// defer os.RemoveAll(repoDir)
 	}
 
 	// Process the repository after cloning
