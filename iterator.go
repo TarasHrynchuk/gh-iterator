@@ -245,6 +245,16 @@ func RunForOrganization(ctx context.Context, orgName string, searchOpts SearchOp
 	}
 }
 
+func CleanUpTempDirectories(ctx context.Context, orgDir string) error {
+	cmd := "find " + path.Join(reposDir, orgDir) + " -type d -name \"*-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\" ! -name \"*-$(date $([ \"$(uname)\" = \"Darwin\" ] && echo \"-v-0d\" || echo \"--date=today\") +%Y-%m-%d)\" -exec rm -rf {} +"
+	exec := exec.NewExecer(".", false)
+	_, err := exec.RunX(ctx, "bash", "-c", cmd)
+	if err != nil {
+		fmt.Println("> Error removing temp directories")
+	}
+	return nil
+}
+
 // RunForRepository runs the processor for a single repository.
 func RunForRepository(ctx context.Context, repoName string, processor Processor, opts Options) error {
 	if strings.Count(repoName, "/") > 1 {
