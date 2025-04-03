@@ -295,6 +295,7 @@ var (
 
 func cloneRepository(ctx context.Context, repo Repository, opts Options) (string, error) {
 	repoDir := path.Join(reposDir, repo.Name+"-"+time.Now().Format("2006-01-02"))
+	repoWorkDir := path.Join(reposDir, repo.Name)
 
 	fmt.Printf("Cloning repo to: %s \n", repoDir)
 
@@ -302,11 +303,11 @@ func cloneRepository(ctx context.Context, repo Repository, opts Options) (string
 
 	info, err := os.Stat(repoDir)
 	if err == nil && info.IsDir() {
-		fmt.Print("Repo already exist. Checkout default branch.\n")
-		if _, err := exec.RunX(ctx, "git", "checkout", repo.DefaultBranchName, "-f"); err != nil {
-			return "", fmt.Errorf("checking out HEAD: %w", err)
+		fmt.Print("Repo already cloned. Copying dir.\n")
+		if _, err := exec.RunX(ctx, "cp", "-r", repoDir, repoWorkDir); err != nil {
+			return "", fmt.Errorf("Error on repo copy %w", err)
 		}
-		return repoDir, nil
+		return repoWorkDir, nil
 	}
 
 	if err := os.MkdirAll(repoDir, os.ModePerm); err != nil {
@@ -348,7 +349,11 @@ func cloneRepository(ctx context.Context, repo Repository, opts Options) (string
 		return "", fmt.Errorf("checking out HEAD: %w", err)
 	}
 
-	return repoDir, nil
+	if _, err := exec.RunX(ctx, "cp", "-r", repoDir, repoWorkDir); err != nil {
+		return "", fmt.Errorf("Error on repo copy %w", err)
+	}
+
+	return repoWorkDir, nil
 }
 
 func checkRecentCommits(ctx context.Context, repo Repository, exec exec.Execer) error {
@@ -426,8 +431,7 @@ func processRepository(ctx context.Context, repo Repository, processor Processor
 			return err
 		}
 
-		// TODO Remove all repositories at the end of script execution
-		// defer os.RemoveAll(repoDir)
+		defer os.RemoveAll(repoDir)
 	}
 
 	// Process the repository after cloning
