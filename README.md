@@ -30,4 +30,3 @@ func main() {
 }
 ```
 
-find . -type d -ctime +0 -exec rm -rf {} +
