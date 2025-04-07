@@ -24,8 +24,8 @@ func main() {
 	}
 	defer f.Close()
 
-	_, err = iterator.RunForOrganization(context.Background(), org, iterator.SearchOptions{Languages: []string{"Go"}, Source: iterator.OnlyNonForks, PerPage: 20, SizeCondition: iterator.NotEmpty}, func(ctx context.Context, repository iterator.Repository, isEmpty bool, exec exec.Execer) error {
-		fmt.Printf("Processing %s/%s\n", org, repository.Name)
+	_, err = iterator.RunForOrganization(context.Background(), org, iterator.SearchOptions{Languages: []string{"Go"}, Source: iterator.OnlyNonForks, PerPage: 20, SizeCondition: iterator.NotEmpty}, func(ctx context.Context, repository string, isEmpty bool, exec exec.Execer) error {
+		fmt.Printf("Processing %s/%s\n", org, repository)
 
 		res, err := exec.Run(ctx, "govulncheck", "./...")
 		if err != nil {
@@ -33,8 +33,10 @@ func main() {
 		}
 
 		if res.ExitCode() == 0 {
+			fmt.Printf("No vulnerabilities found for %s/%s\n", org, repository)
 			fmt.Printf("No vulnerabilities found for %s/%s\n", org, repository.Name)
 		} else if len(res.TrimStdout()) > 0 {
+			fmt.Fprintf(f, "%s\n%s\n", repository, strings.Repeat("-", len(repository)))
 			fmt.Fprintf(f, "%s\n%s\n", repository.Name, strings.Repeat("-", len(repository.Name)))
 			f.WriteString(res.Stdout())
 			f.WriteString("\n")
