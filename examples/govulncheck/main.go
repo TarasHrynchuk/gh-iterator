@@ -34,10 +34,8 @@ func main() {
 
 		if res.ExitCode() == 0 {
 			fmt.Printf("No vulnerabilities found for %s/%s\n", org, repository)
-			fmt.Printf("No vulnerabilities found for %s/%s\n", org, repository.Name)
 		} else if len(res.TrimStdout()) > 0 {
 			fmt.Fprintf(f, "%s\n%s\n", repository, strings.Repeat("-", len(repository)))
-			fmt.Fprintf(f, "%s\n%s\n", repository.Name, strings.Repeat("-", len(repository.Name)))
 			f.WriteString(res.Stdout())
 			f.WriteString("\n")
 		}
