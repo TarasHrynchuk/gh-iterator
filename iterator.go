@@ -34,10 +34,13 @@ var (
 	reposDir string
 )
 
-func init() {
+func GetReposWorkingDir() string {
 	baseDir, _ = filepath.Abs(os.TempDir())
+	return path.Join(baseDir, "gh-iterator")
+}
 
-	reposDir = path.Join(baseDir, "gh-iterator")
+func init() {
+	reposDir = GetReposWorkingDir()
 	if err := os.MkdirAll(reposDir, 0755); err != nil {
 		panic(err)
 	}
@@ -53,6 +56,9 @@ type Processor func(ctx context.Context, repository Repository, isEmpty bool, ex
 type Options struct {
 	// UseHTTPS is a flag to use HTTPS instead of SSH to clone the repositories.
 	UseHTTPS bool
+	// If true - repo will be cloned only once as read only copy. All further modifications will be
+	// done on the copy of this initial clone.
+	CloneOnce bool
 	// CloningSubset is a list of files or directories to clone to avoid cloning the whole repository.
 	// it is helpful on big repositories to speed up the process.
 	CloningSubset []string
@@ -244,16 +250,6 @@ func RunForOrganization(ctx context.Context, orgName string, searchOpts SearchOp
 	}
 }
 
-func CleanUpTempDirectories(ctx context.Context, orgDir string) error {
-	cmd := "find " + path.Join(reposDir, orgDir) + " -type d -name \"*-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\" ! -name \"*-$(date $([ \"$(uname)\" = \"Darwin\" ] && echo \"-v-0d\" || echo \"--date=today\") +%Y-%m-%d)\" -exec rm -rf {} +"
-	exec := exec.NewExecer(".", false)
-	_, err := exec.RunX(ctx, "bash", "-c", cmd)
-	if err != nil {
-		fmt.Println("> Error removing temp directories")
-	}
-	return nil
-}
-
 // RunForRepository runs the processor for a single repository.
 func RunForRepository(ctx context.Context, repoName string, processor Processor, opts Options) error {
 	if strings.Count(repoName, "/") > 1 {
@@ -293,25 +289,31 @@ var (
 )
 
 func cloneRepository(ctx context.Context, repo Repository, opts Options) (string, error) {
-	repoDir := path.Join(reposDir, repo.Name+"-"+time.Now().Format("2006-01-02"))
-	repoWorkDir := path.Join(reposDir, repo.Name)
+	repoDir := path.Join(reposDir, repo.Name+"-"+time.Now().Format("02-15-04-05"))
+	repoWorkDir := repoDir
+
+	if opts.CloneOnce {
+		repoDir = path.Join(reposDir, repo.Name+"-"+time.Now().Format("2006-01-02"))
+		repoWorkDir = path.Join(reposDir, repo.Name)
+		exec := exec.NewExecer(repoDir, opts.Debug)
+
+		info, err := os.Stat(repoDir)
+		if err == nil && info.IsDir() {
+			fmt.Print("Repo already cloned. Copying dir.\n")
+			if _, err := exec.RunX(ctx, "cp", "-r", repoDir, repoWorkDir); err != nil {
+				return "", fmt.Errorf("error on repo copy %w", err)
+			}
+			return repoWorkDir, nil
+		}
+	}
 
 	fmt.Printf("Cloning repo to: %s \n", repoDir)
-
-	exec := exec.NewExecer(repoDir, opts.Debug)
-
-	info, err := os.Stat(repoDir)
-	if err == nil && info.IsDir() {
-		fmt.Print("Repo already cloned. Copying dir.\n")
-		if _, err := exec.RunX(ctx, "cp", "-r", repoDir, repoWorkDir); err != nil {
-			return "", fmt.Errorf("Error on repo copy %w", err)
-		}
-		return repoWorkDir, nil
-	}
 
 	if err := os.MkdirAll(repoDir, os.ModePerm); err != nil {
 		return "", fmt.Errorf("creating cloning directory: %w", err)
 	}
+
+	exec := exec.NewExecer(repoDir, opts.Debug)
 
 	if _, err := exec.RunX(ctx, "git", "init"); err != nil {
 		return "", fmt.Errorf("cloning repository: %w", err)
@@ -348,8 +350,11 @@ func cloneRepository(ctx context.Context, repo Repository, opts Options) (string
 		return "", fmt.Errorf("checking out HEAD: %w", err)
 	}
 
-	if _, err := exec.RunX(ctx, "cp", "-r", repoDir, repoWorkDir); err != nil {
-		return "", fmt.Errorf("Error on repo copy %w", err)
+	if opts.CloneOnce {
+		// Copy into working directory right after cloning operation
+		if _, err := exec.RunX(ctx, "cp", "-r", repoDir, repoWorkDir); err != nil {
+			return "", fmt.Errorf("error on repo copy %w", err)
+		}
 	}
 
 	return repoWorkDir, nil
